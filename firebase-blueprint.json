@@ -1,0 +1,109 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Enterprise user profile detailing identity, role, and corporate affiliation",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Unique identifier assigned by Firebase Authentication"
+        },
+        "name": {
+          "type": "string",
+          "description": "Legal representative full name"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Corporate email address"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["msme_owner", "credit_officer", "administrator"],
+          "description": "Access control role assigned to the user"
+        },
+        "company": {
+          "type": "string",
+          "description": "Corporate or Bank Legal Organization Name"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Profile enrollment timestamp"
+        },
+        "alternateDataSources": {
+          "type": "object",
+          "description": "Map of alternate data sources and their connection statuses",
+          "properties": {
+            "status": { "type": "string", "enum": ["Connected", "Pending", "Disconnected"] },
+            "lastSync": { "type": "string" },
+            "dataConfidence": { "type": "string" }
+          }
+        }
+      },
+      "required": ["uid", "name", "email", "role", "company", "createdAt"]
+    },
+    "MSMEProfile": {
+      "title": "MSMEProfile",
+      "description": "Business profile representing an Indian Micro, Small, or Medium Enterprise",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique profile registration identifier" },
+        "ownerId": { "type": "string", "description": "Reference UID to the authenticated user profile" },
+        "businessName": { "type": "string", "description": "Registered business legal name" },
+        "registrationNumber": { "type": "string", "description": "Sovereign verification ID (GSTIN, Udyam, or PAN)" },
+        "industryType": { "type": "string", "description": "Target commercial industry classification" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Business profile creation timestamp" }
+      },
+      "required": ["id", "ownerId", "businessName", "registrationNumber", "industryType", "createdAt"]
+    },
+    "HealthCard": {
+      "title": "HealthCard",
+      "description": "Sovereign alternative credit underwriting health card holding alternative credit scores",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Application card ID (e.g. M360-1234)" },
+        "businessName": { "type": "string", "description": "Name of the audited enterprise" },
+        "registrationNumber": { "type": "string", "description": "Sovereign tax registration ID" },
+        "industryType": { "type": "string", "description": "Audited business industry type" },
+        "score": { "type": "integer", "minimum": 300, "maximum": 900, "description": "Computed custom Credit Health Score" },
+        "riskRating": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+        "status": { "type": "string", "enum": ["PENDING", "GENERATED", "UNDER_REVIEW", "APPROVED", "REJECTED"] },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last risk calculation evaluation update" }
+      },
+      "required": ["id", "businessName", "registrationNumber", "industryType", "score", "riskRating", "status", "updatedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Secure, write-once trace log capturing sensitive system, auth, and rating actions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique log trace identifier" },
+        "timestamp": { "type": "string", "format": "date-time", "description": "Log generation timestamp" },
+        "userId": { "type": "string", "description": "UID of the actor who triggered the logged event" },
+        "action": { "type": "string", "description": "General action trigger category" },
+        "description": { "type": "string", "description": "Human-readable description detailing what changed" }
+      },
+      "required": ["id", "timestamp", "userId", "action", "description"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Authorized user profiles partitioned by unique user ID"
+    },
+    "/msme_profiles/{profileId}": {
+      "schema": "MSMEProfile",
+      "description": "Corporate profiles holding business and sovereign identification registries"
+    },
+    "/health_cards/{cardId}": {
+      "schema": "HealthCard",
+      "description": "Alternative credit rating health cards containing computed risk evaluations"
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Write-once trace logs capturing system security, auth, and underwriting activities"
+    }
+  }
+}

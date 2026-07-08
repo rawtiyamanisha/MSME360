@@ -1,0 +1,6 @@
+{
+  "name": "MSME360",
+  "description": "AI-powered Financial Health Card platform that helps banks assess the creditworthiness of New-to-Credit (NTC) and New-to-Bank (NTB) MSMEs using alternate financial data.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

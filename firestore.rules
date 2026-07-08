@@ -1,0 +1,179 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default catch-all security net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ==========================================
+    // GLOBAL REUSABLE HARDENED HELPERS
+    // ==========================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Safe role-retrieval helper using DB lookup (prevents identity claims spoofing)
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(role) {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             getUserData().role == role;
+    }
+
+    // ==========================================
+    // 1. USERS COLLECTION ENTITY VALIDATIONS
+    // ==========================================
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'name', 'role', 'company', 'createdAt']) &&
+             data.keys().size() >= 6 && data.keys().size() <= 8 &&
+             data.uid == request.auth.uid &&
+             data.email is string && data.email.size() <= 150 &&
+             data.name is string && data.name.size() <= 150 &&
+             data.role is string && (data.role == 'msme_owner' || data.role == 'credit_officer' || data.role == 'administrator') &&
+             data.company is string && data.company.size() <= 150 &&
+             data.createdAt is string && data.createdAt.size() <= 40;
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow list: if hasRole('credit_officer') || hasRole('administrator');
+      
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming());
+      
+      allow update: if isOwner(userId) && isValidUser(incoming()) && (
+        // Action: Update Profile Details
+        (incoming().diff(existing()).affectedKeys().hasOnly(['name', 'company', 'phoneNumber', 'lastLoginAt'])) ||
+        // Action: Sync Alternate Data Sources
+        (incoming().diff(existing()).affectedKeys().hasOnly(['alternateDataSources']))
+      );
+      
+      allow delete: if hasRole('administrator');
+    }
+
+    // ==========================================
+    // 2. MSME PROFILES COLLECTION ENTITY
+    // ==========================================
+
+    function isValidMSMEProfile(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'businessName', 'registrationNumber', 'industryType', 'createdAt']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.ownerId == request.auth.uid &&
+             data.businessName is string && data.businessName.size() <= 200 &&
+             data.registrationNumber is string && data.registrationNumber.size() <= 50 &&
+             data.industryType is string && data.industryType.size() <= 100 &&
+             data.createdAt is string && data.createdAt.size() <= 40;
+    }
+
+    match /msme_profiles/{profileId} {
+      allow get: if isSignedIn() && (resource.data.ownerId == request.auth.uid || hasRole('credit_officer') || hasRole('administrator'));
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || hasRole('credit_officer') || hasRole('administrator'));
+      
+      allow create: if isSignedIn() && isValidId(profileId) && isValidMSMEProfile(incoming());
+      
+      allow update: if isSignedIn() && (existing().ownerId == request.auth.uid || hasRole('credit_officer') || hasRole('administrator')) &&
+                    isValidMSMEProfile(incoming()) &&
+                    incoming().ownerId == existing().ownerId &&
+                    incoming().createdAt == existing().createdAt;
+                    
+      allow delete: if hasRole('administrator');
+    }
+
+    // ==========================================
+    // 3. HEALTH CARDS COLLECTION ENTITY (MSME APPLICATIONS)
+    // ==========================================
+
+    function isValidHealthCard(data) {
+      return data.keys().hasAll(['id', 'businessName', 'registrationNumber', 'industryType', 'score', 'riskRating', 'status', 'updatedAt']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.businessName is string && data.businessName.size() <= 200 &&
+             data.score is int && data.score >= 300 && data.score <= 900 &&
+             data.riskRating is string && (data.riskRating == 'LOW' || data.riskRating == 'MEDIUM' || data.riskRating == 'HIGH' || data.riskRating == 'CRITICAL') &&
+             data.status is string && (data.status == 'PENDING' || data.status == 'GENERATED' || data.status == 'UNDER_REVIEW' || data.status == 'APPROVED' || data.status == 'REJECTED') &&
+             data.updatedAt is string && data.updatedAt.size() <= 40;
+    }
+
+    match /health_cards/{cardId} {
+      // Owners can view only their own records, bank officers and admins can view any card
+      allow get: if isSignedIn() && (
+        resource.data.msmeId == request.auth.uid || 
+        resource.data.ownerId == request.auth.uid || 
+        resource.data.email == request.auth.token.email ||
+        hasRole('credit_officer') || 
+        hasRole('administrator')
+      );
+      
+      allow list: if isSignedIn() && (
+        resource.data.msmeId == request.auth.uid || 
+        resource.data.ownerId == request.auth.uid || 
+        resource.data.email == request.auth.token.email ||
+        hasRole('credit_officer') || 
+        hasRole('administrator')
+      );
+
+      allow create: if (hasRole('credit_officer') || hasRole('administrator')) && 
+                    isValidId(cardId) && 
+                    isValidHealthCard(incoming());
+
+      allow update: if (hasRole('credit_officer') || hasRole('administrator')) && 
+                    isValidHealthCard(incoming()) && (
+                      // Override for administrator bypass
+                      hasRole('administrator') || (
+                        // Protect closed terminal outcomes from manual modifications by standard credit officers
+                        existing().status != 'APPROVED' && 
+                        existing().status != 'REJECTED' &&
+                        incoming().diff(existing()).affectedKeys().hasOnly(['score', 'riskRating', 'status', 'comments', 'scores', 'strengths', 'weaknesses', 'businessInsights', 'updatedAt'])
+                      )
+                    );
+
+      allow delete: if indestructibleCheck() || hasRole('administrator');
+    }
+
+    function indestructibleCheck() {
+      return false;
+    }
+
+    // ==========================================
+    // 4. AUDIT LOGS COLLECTION ENTITY
+    // ==========================================
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['id', 'timestamp', 'userId', 'action', 'description']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.userId == request.auth.uid &&
+             data.action is string && data.action.size() <= 100 &&
+             data.description is string && data.description.size() <= 500 &&
+             data.timestamp is string && data.timestamp.size() <= 40;
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if hasRole('credit_officer') || hasRole('administrator');
+      
+      // Write-once immutability pattern
+      allow create: if isSignedIn() && isValidId(logId) && isValidAuditLog(incoming());
+      allow update, delete: if false;
+    }
+  }
+}
